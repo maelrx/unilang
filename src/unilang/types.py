@@ -52,4 +52,6 @@ class LocalizedResponse:
     provider_content: str
     render_content: str
     render_language: str
+    provider_variant: MessageVariant | None = None
+    render_variant: MessageVariant | None = None
     metadata: dict = field(default_factory=dict)
