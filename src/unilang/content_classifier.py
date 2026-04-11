@@ -38,7 +38,12 @@ class ContentClassifier:
     def _is_mixed(self, text: str) -> bool:
         matches = list(_FENCED_CODE_RE.finditer(text))
         if not matches:
-            return False
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            if not lines:
+                return False
+            terminal_lines = [line for line in lines if _SHELL_LINE_RE.match(line) or "Traceback (most recent call last):" in line]
+            prose_lines = [line for line in lines if line not in terminal_lines and self._looks_like_prose(line)]
+            return bool(terminal_lines and prose_lines)
 
         prose_outside_fences = []
         cursor = 0

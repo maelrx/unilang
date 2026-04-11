@@ -32,3 +32,10 @@ def test_classifies_mixed_markdown_with_fence() -> None:
     mixed = "Please review this snippet:\n```python\ndef greet():\n    return 1\n```\nIt is used in the runtime."
 
     assert classifier.classify(mixed) == "mixed"
+
+
+def test_classifies_mixed_prose_and_terminal_output() -> None:
+    classifier = ContentClassifier()
+    mixed = "Please review the failure below.\nERROR failed test\n$ pytest tests/test_language_runtime.py\nThe command reproduces the issue."
+
+    assert classifier.classify(mixed) == "mixed"

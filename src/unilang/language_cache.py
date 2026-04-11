@@ -17,12 +17,27 @@ class TransformCacheKey:
     model_name: str
 
 
+@dataclass(frozen=True, slots=True)
+class CacheLookupResult:
+    content: str | None
+    status: str
+
+
 class LanguageCache:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
+        self._stats = {
+            "hit": 0,
+            "miss": 0,
+            "version_mismatch": 0,
+            "store_failure": 0,
+        }
         self._ensure_schema()
 
     def get(self, key: TransformCacheKey) -> str | None:
+        return self.lookup(key).content
+
+    def lookup(self, key: TransformCacheKey) -> CacheLookupResult:
         with sqlite3.connect(self.db_path) as connection:
             row = connection.execute(
                 """
@@ -49,7 +64,35 @@ class LanguageCache:
                     key.model_name,
                 ),
             ).fetchone()
-        return row[0] if row else None
+            if row:
+                self._stats["hit"] += 1
+                return CacheLookupResult(content=row[0], status="hit")
+
+            version_mismatch = connection.execute(
+                """
+                SELECT 1
+                FROM transform_cache
+                WHERE source_hash = ?
+                  AND source_language = ?
+                  AND target_language = ?
+                  AND transform_type = ?
+                  AND model_provider = ?
+                  AND model_name = ?
+                LIMIT 1
+                """,
+                (
+                    key.source_hash,
+                    key.source_language,
+                    key.target_language,
+                    key.transform_type,
+                    key.model_provider,
+                    key.model_name,
+                ),
+            ).fetchone()
+
+        status = "version_mismatch" if version_mismatch else "miss"
+        self._stats[status] += 1
+        return CacheLookupResult(content=None, status=status)
 
     def set(self, key: TransformCacheKey, content: str) -> None:
         with sqlite3.connect(self.db_path) as connection:
@@ -79,6 +122,17 @@ class LanguageCache:
                     content,
                 ),
             )
+
+    def store(self, key: TransformCacheKey, content: str) -> bool:
+        try:
+            self.set(key, content)
+        except sqlite3.Error:
+            self._stats["store_failure"] += 1
+            return False
+        return True
+
+    def stats_snapshot(self) -> dict[str, int]:
+        return dict(self._stats)
 
     def _ensure_schema(self) -> None:
         with sqlite3.connect(self.db_path) as connection:

@@ -308,6 +308,22 @@ Push policy through child tasks and gateway delivery surfaces.
 ### Phase 07 — Polish and upstreaming
 Harden, document, benchmark, and prepare the work for serious upstream discussion.
 
+## Phase 07 Packet
+
+Release-facing artifacts now live here:
+
+- `docs/OPERATOR-GUIDE.md`
+- `docs/MIGRATION.md`
+- `docs/ACCEPTANCE-CHECKLIST.md`
+- `docs/BENCHMARKS.md`
+- `docs/UPSTREAM-REVIEW.md`
+- `docs/RELEASE-NOTES.md`
+- `docs/PHASE-07-CLOSE-MEMO.md`
+
+Deterministic benchmark harness:
+
+- `benchmark_runtime.py`
+
 ---
 
 ## Success Criteria
