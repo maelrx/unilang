@@ -1,32 +1,17 @@
 from __future__ import annotations
 
-import os
-from typing import Literal
+import logging
 
 from .config import TransformFailureMode
+from .translation_adapter import BaseTranslationAdapter
 
 
 class MiniMaxTranslationError(Exception):
     """Raised when MiniMax translation fails."""
 
 
-class MiniMaxTranslationAdapter:
-    """Translation adapter using MiniMax M2.7/M2.5 via Anthropic-compatible API.
-
-    Parameters
-    ----------
-    api_key : str
-        MiniMax API key (sk-cp-...).
-    model : str, default "MiniMax-M2.7-highspeed"
-        Model name. Use "MiniMax-M2.7" for slower but potentially more
-        accurate translations, or "MiniMax-M2.7-highspeed" for faster.
-    base_url : str, default "https://api.minimax.io/anthropic"
-        API endpoint base URL.
-    timeout_seconds : float, default 30.0
-        Request timeout.
-    failure_mode : TransformFailureMode, default "pass_through"
-        Behaviour on translation failure.
-    """
+class MiniMaxTranslationAdapter(BaseTranslationAdapter):
+    """Translation adapter using MiniMax's Anthropic-compatible API."""
 
     def __init__(
         self,
@@ -41,96 +26,27 @@ class MiniMaxTranslationAdapter:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
         self._failure_mode = failure_mode
+        self._client = None
+        self._logger = logging.getLogger("unilang.minimax")
 
-    def translate(
-        self,
-        *,
-        text: str,
-        source_language: str,
-        target_language: str,
-        preserve_literal_segments: bool = True,
-    ) -> str:
-        return self._call(
-            text=text,
-            source_language=source_language,
-            target_language=target_language,
-            preserve_literal_segments=preserve_literal_segments,
-        )
-
-    def localize(
-        self,
-        *,
-        text: str,
-        source_language: str,
-        target_language: str,
-        preserve_literal_segments: bool = True,
-    ) -> str:
-        return self._call(
-            text=text,
-            source_language=source_language,
-            target_language=target_language,
-            preserve_literal_segments=preserve_literal_segments,
-        )
-
-    def _call(
-        self,
-        *,
-        text: str,
-        source_language: str,
-        target_language: str,
-        preserve_literal_segments: bool,
-    ) -> str:
-        if source_language == target_language:
-            return text
-
-        if preserve_literal_segments:
-            import re
-
-            _LITERAL_RE = re.compile(r"(```[\s\S]*?```|`[^`\n]+`)")
-
-            parts: list[str] = []
-            cursor = 0
-            for match in _LITERAL_RE.finditer(text):
-                prose = text[cursor : match.start()]
-                if prose:
-                    parts.append(
-                        self._translate_chunk(prose, source_language, target_language)
-                    )
-                parts.append(match.group(0))
-                cursor = match.end()
-            tail = text[cursor:]
-            if tail:
-                parts.append(self._translate_chunk(tail, source_language, target_language))
-            return "".join(parts)
-
-        return self._translate_chunk(text, source_language, target_language)
-
-    def _translate_chunk(
-        self, text: str, source_language: str, target_language: str
-    ) -> str:
+    def _transform_prose(self, text: str, source_language: str, target_language: str) -> str:
         lang_display = _LANGUAGE_DISPLAY.get(
             (source_language, target_language),
             f"{source_language} to {target_language}",
         )
-
         system_prompt = (
-            f"You are a professional translator. Translate the following text from "
-            f"{lang_display}. Output ONLY the translated text, with no preamble, "
-            f"explanation, or formatting. Preserve all punctuation and capitalization."
+            "You are a professional translator. Translate the user's text exactly once. "
+            f"Translate from {lang_display}. Output only the translated text. Preserve meaning, "
+            "tone, punctuation, and capitalization. Do not add explanations or markdown fences."
+        )
+        user_prompt = (
+            f"Source language: {source_language}\n"
+            f"Target language: {target_language}\n\n"
+            f"Text:\n{text}"
         )
 
-        user_prompt = f"Translate this text from {source_language} to {target_language}:\n\n{text}"
-
         try:
-            import anthropic
-
-            client = anthropic.Anthropic(
-                api_key=self._api_key,
-                base_url=self._base_url,
-                timeout=self._timeout,
-            )
-
-            response = client.messages.create(
+            response = self._get_client().messages.create(
                 model=self._model,
                 max_tokens=4096,
                 system=system_prompt,
@@ -140,37 +56,37 @@ class MiniMaxTranslationAdapter:
                         "content": [{"type": "text", "text": user_prompt}],
                     }
                 ],
-                temperature=1.0,
+                temperature=0.1,
             )
-
-            if not response.content:
+            translated_text = self._extract_text(response)
+            if not translated_text:
                 raise MiniMaxTranslationError("Empty response from MiniMax API")
-
-            first_block = response.content[0]
-            if first_block.type == "text":
-                return first_block.text
-            elif first_block.type == "thinking":
-                if len(response.content) > 1 and response.content[1].type == "text":
-                    return response.content[1].text
-                raise MiniMaxTranslationError(
-                    f"Unexpected content block type: {first_block.type}"
-                )
-            else:
-                raise MiniMaxTranslationError(
-                    f"Unexpected content block type: {first_block.type}"
-                )
-
+            return translated_text.strip()
         except Exception as exc:
             if self._failure_mode == "pass_through":
-                import logging
-
-                logging.getLogger("unilang.minimax").warning(
+                self._logger.warning(
                     "MiniMax translation failed (%s). Falling back to pass-through.", exc
                 )
                 return text
-            raise MiniMaxTranslationError(
-                f"MiniMax translation failed: {exc}"
-            ) from exc
+            raise MiniMaxTranslationError(f"MiniMax translation failed: {exc}") from exc
+
+    def _get_client(self):
+        if self._client is None:
+            import anthropic
+
+            self._client = anthropic.Anthropic(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                timeout=self._timeout,
+            )
+        return self._client
+
+    def _extract_text(self, response) -> str:
+        text_blocks: list[str] = []
+        for block in getattr(response, "content", []) or []:
+            if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+                text_blocks.append(block.text)
+        return "".join(text_blocks)
 
 
 _LANGUAGE_DISPLAY: dict[tuple[str, str], str] = {

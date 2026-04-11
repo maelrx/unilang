@@ -2,370 +2,420 @@
 
 # unilang
 
-**English** · [Português (Brasil)](README.pt-BR.md)
+**English** · [Português (Brasil)](README_pt-BR.md)
 
 **Canonical internal language. Native multilingual UX.**
 
-**A language mediation runtime for Hermes Agent that treats multilinguality as a systems problem — not a prompt trick.**
+Language mediation runtime primitives for multilingual agent systems, designed around a simple rule:
 
-[![status](https://img.shields.io/badge/status-research%20track-0f172a?style=for-the-badge)](#current-status)
-[![target](https://img.shields.io/badge/target-Hermes%20Agent-111827?style=for-the-badge)](#how-it-fits-hermes)
-[![architecture](https://img.shields.io/badge/architecture-language%20mediation%20runtime-1f2937?style=for-the-badge)](#the-runtime-model)
-[![policy](https://img.shields.io/badge/policy-canonical%20provider%20language-374151?style=for-the-badge)](#design-goals)
-[![ux](https://img.shields.io/badge/ux-native%20multilingual-4b5563?style=for-the-badge)](#what-the-user-experiences)
-[![safety](https://img.shields.io/badge/safety-literal%20preservation-6b7280?style=for-the-badge)](#what-must-never-be-mangled)
+**humans speak naturally, the runtime stays coherent.**
 
-<br>
+[![python](https://img.shields.io/badge/python-3.11%2B-111827?style=for-the-badge)](#installation)
+[![status](https://img.shields.io/badge/status-active%20prototype-1f2937?style=for-the-badge)](#current-status)
+[![target](https://img.shields.io/badge/target-Hermes%20Agent-374151?style=for-the-badge)](#hermes-integration)
+[![architecture](https://img.shields.io/badge/architecture-language%20mediation%20runtime-4b5563?style=for-the-badge)](#architecture)
+[![safety](https://img.shields.io/badge/safety-literal%20preservation-6b7280?style=for-the-badge)](#safety-invariants)
 
 ```text
-raw → provider → Hermes runtime → render
+raw -> provider -> agent runtime -> render
 ```
 
-**Users should speak naturally.**  
-**The runtime should stay linguistically coherent.**
-
-<br>
-
-> *A multilingual user experience does not require a multilingual internal state.*
-
-<br>
-
-[Why This Exists](#why-this-exists) · [Runtime Model](#the-runtime-model) · [How It Fits Hermes](#how-it-fits-hermes) · [Current Status](#current-status) · [Roadmap](#implementation-roadmap)
+[Overview](#overview) · [Current Status](#current-status) · [Architecture](#architecture) · [Benchmarks](#benchmarks) · [Installation](#installation) · [Hermes Integration](#hermes-integration)
 
 </div>
 
 ---
 
-> [!IMPORTANT]
-> `unilang` is **not** “translate everything into English and hope for the best.”
->
-> It is a design and implementation track for a **language mediation runtime**: a runtime layer that lets users talk to Hermes in their native language while the agent maintains a **stable canonical internal language policy** for reasoning, summaries, memory, delegation, and tool-heavy execution.
+## Overview
 
----
+`unilang` is a **language mediation runtime**.
 
-## Why This Exists
+It lets a user interact in their own language while the agent runtime keeps a stable **provider-language transcript** for model calls, summaries, memory, delegation, and tool-heavy flows.
 
-Most multilingual AI products stop at surface fluency.
+This is not a prompt trick and not a generic "translate everything" layer. It is a runtime policy that separates three concerns:
 
-That is enough for a chatbot. It is **not** enough for an agent runtime.
-
-Hermes is not just generating replies. It assembles prompts, resolves providers, persists sessions, compresses context, routes through gateway surfaces, and runs tool-heavy workflows across long-lived state. Those are real system boundaries in the official Hermes architecture and developer docs. citeturn422277search2turn422277search1turn422277search0turn422277search6turn422277search7turn422277search5
-
-Once an agent accumulates state, **language becomes infrastructure**.
-
-If every user turn, memory write, delegated payload, compression summary, and tool result drifts between languages, the runtime inherits avoidable instability:
-
-- memory drift;
-- weaker retrieval semantics;
-- inconsistent summaries;
-- noisy delegated tasks;
-- unnecessary token expansion;
-- literal corruption around code, logs, flags, paths, and structured payloads.
-
-`unilang` exists to make language policy **explicit, testable, inspectable, and runtime-native**.
-
----
-
-## The Thesis
-
-A serious agent should separate:
-
-1. **the language the human prefers to use**, from
-2. **the language the runtime prefers to preserve internally**.
-
-That separation creates a simple but powerful operating model:
-
-- people interact in their own language;
-- the runtime reasons over a canonical provider-facing transcript;
-- the original message remains available for audit and literal recovery;
-- outputs are rendered back in the user’s language without poisoning internal state.
-
-This repo explores that model end-to-end for Hermes.
-
----
-
-## The Runtime Model
-
-Every important turn can exist in up to three variants:
-
-| Variant | Purpose | Example |
-|---|---|---|
-| `raw` | original user text preserved exactly | `me explica esse erro e arruma meu docker compose` |
-| `provider` | canonical machine-facing form used by runtime flows | `Explain this error and fix my docker compose setup.` |
-| `render` | user-facing localized response | `Claro — vou te explicar o erro e ajustar seu docker-compose.` |
-
-That gives the system three things at once:
-
-- native UX;
-- coherent runtime state;
-- replayable provenance.
-
-```mermaid
-flowchart LR
-    U[User turn\nany language] --> M1[Input mediation\ndetect · classify · normalize]
-    M1 --> P[Provider transcript\ncanonical internal language]
-    P --> H[Hermes runtime\nreasoning · tools · memory · compression · delegation]
-    H --> M2[Output mediation\nlocalize · preserve literals]
-    M2 --> R[Render transcript\nuser-facing language]
-
-    U --> S[(Variant store)]
-    P --> S
-    R --> S
-```
-
----
-
-## What the User Experiences
-
-From the user side, `unilang` should feel almost invisible.
-
-The user gets:
-
-- natural input in Portuguese, Japanese, Arabic, Spanish, mixed language, or whatever they actually use;
-- natural output in the same language;
-- protection against awkward translationese around technical content;
-- preservation of code, stack traces, configs, JSON, commands, and file paths;
-- consistent behavior across longer sessions.
-
-The point is **not** to make the user adapt to the runtime.
-
-The point is to let the runtime do the adapting without becoming linguistically chaotic.
-
----
-
-## What Must Never Be Mangled
-
-> [!CAUTION]
-> If `unilang` ever mutates machine-critical literals, the runtime has failed.
-
-These classes of content must be preserved exactly when policy requires:
-
-- code fences and code blocks;
-- shell commands and CLI flags;
-- file paths and URLs;
-- environment variables and secret placeholders;
-- JSON, YAML, XML, SQL, regex, and config fragments;
-- stack traces, logs, and terminal output;
-- package names, symbols, identifiers, and function names;
-- diff hunks and structured tool payloads.
-
-Fluency is optional. Literal integrity is not.
-
----
-
-## Design Goals
-
-### 1. Canonical machine-facing state
-The runtime should have a stable internal language policy for reasoning, memory, compression, delegation, and retrieval-facing representations.
-
-### 2. Native human-facing output
-Users should still receive answers in their own language, naturally.
-
-### 3. Literal safety
-Machine-critical text survives mediation untouched.
-
-### 4. Selective mediation
-Not every byte should be translated. Policy must be content-aware.
-
-### 5. Variant persistence
-`raw`, `provider`, and `render` variants should be reusable for audit, replay, caching, and future evaluation.
-
-### 6. Observability
-Language mediation should be measurable, debuggable, and benchmarkable.
-
-### 7. Upstream realism
-This should fit Hermes as it exists, not as an imaginary greenfield system.
-
----
-
-## How It Fits Hermes
-
-`unilang` is being shaped against Hermes’ real architectural seams.
-
-The official Hermes docs explicitly surface prompt assembly, provider runtime resolution, session storage, context compression, gateway internals, and agent-loop internals as first-class implementation surfaces. That is exactly where language policy matters most. citeturn422277search2turn422277search1turn422277search0turn422277search4turn422277search5turn422277search6turn422277search7
-
-| Hermes surface | Why it matters for `unilang` |
+| Variant | Purpose |
 |---|---|
-| Prompt assembly | canonical provider transcript must preserve prompt cache stability and avoid poisoning persistent state |
-| Provider runtime resolution | mediation policy has to coexist with how Hermes selects providers and API modes |
-| Agent loop | turn lifecycle is the natural interception point for input/output mediation |
-| Session storage | variant persistence and replay depend on where transcript state is stored |
-| Context compression | coherent provider-language summaries are easier to compare and reuse |
-| Gateway internals | localization belongs at delivery edges without contaminating internal state |
-| Delegation | child tasks should inherit stable machine-facing payloads |
-| Memory pipeline | canonicalized memory writes can reduce multilingual drift |
+| `raw` | original user text preserved exactly |
+| `provider` | canonical machine-facing text used internally |
+| `render` | localized human-facing output |
+
+That separation gives the system three properties at once:
+
+- native multilingual UX;
+- stable machine-facing state;
+- auditable provenance for replay and debugging.
 
 ---
 
-## What This Repo Is
+## Why It Exists
 
-Today, this repo reads as a **serious design-and-integration track** rather than a finished packaged runtime.
+Multilinguality is easy at the chat surface and hard in the runtime.
 
-That is a strength, not a weakness.
+Once an agent starts accumulating state, language becomes infrastructure:
 
-It means the project is already organized around implementation phases instead of vague ideas.
+- memory writes drift;
+- summaries become inconsistent;
+- delegated tasks get noisy;
+- retrieval semantics fragment;
+- code and machine literals risk being mangled.
 
-### Current repo shape
-
-| Area | Role |
-|---|---|
-| `.planning/research/` | architecture notes, host verification, integration strategy |
-| `.planning/phases/` | phased implementation docs |
-| `.planning/plans/` | execution planning for host integration |
-
-### Current phase map
-
-| Phase | Focus |
-|---|---|
-| 00 | Host integration |
-| 01 | Core runtime |
-| 02 | Variants and storage |
-| 03 | Prompt artifacts |
-| 04 | Tool results |
-| 05 | Memory and compression |
-| 06 | Delegation and gateways |
-| 07 | Polish and upstreaming |
-
-That is the right shape for a project whose hardest problem is architectural correctness.
+`unilang` exists to make language policy explicit, testable, and reusable across those boundaries.
 
 ---
 
 ## Current Status
 
-> [!NOTE]
-> `unilang` should currently be read as a **high-conviction implementation roadmap backed by real Hermes seams**.
->
-> The project is already structured like a system that intends to ship — but the README should reflect that honestly rather than pretending it is already a turnkey product.
+`unilang` is currently an **active prototype with working runtime primitives and Hermes-side integration**.
 
-So the right framing is:
+What is implemented today:
 
-- not “experimental prompt hack”;  
-- not “universal translator plugin”;  
-- not “finished SDK with polished install story”;  
-- but **an upstream-quality runtime architecture track with clear implementation boundaries**.
+- `LanguageRuntime` orchestration for input normalization, output localization, tool-result mediation, prompt artifacts, compression, memory, delegation, and gateway delivery;
+- SQLite-backed `LanguageCache` for transform reuse;
+- SQLite-backed `VariantStore` for `raw` / `provider` / `render` persistence;
+- `PassthroughTranslationAdapter` for deterministic local tests;
+- `MiniMaxTranslationAdapter` for live translation via MiniMax's Anthropic-compatible API;
+- Hermes-side `UnilangMediator` integration in the agent loop;
+- regression coverage for runtime behavior and mediator integration.
 
----
+What is still prototype-level:
 
-## Why This Approach Is Strong
-
-Because it attacks the real failure mode.
-
-Most multilingual agent setups treat language as a surface concern.
-
-`unilang` treats language as a **state-management concern**.
-
-That changes everything:
-
-- summaries become comparable across sessions;
-- memory becomes less language-fragmented;
-- delegated tasks inherit cleaner payloads;
-- provider-facing reasoning stays coherent;
-- user-facing language remains native;
-- evaluation becomes possible at the runtime-policy layer.
-
-This is the difference between “the model speaks many languages” and “the system has a language architecture.”
+- language detection is heuristic, not a full language ID model;
+- live translation quality depends on the configured external model;
+- streaming localization is not implemented;
+- this repository is centered on the runtime layer, not a polished end-user product surface.
 
 ---
 
-## Non-Goals
+## Tested Surface
 
-`unilang` is **not** trying to be:
+The current tested surface includes:
 
-- a generic chatbot translator;
-- a blind “everything into English” pipeline;
-- a replacement for multilingual model capability;
-- a justification to rewrite entire histories unnecessarily;
-- a layer that sacrifices literal correctness for stylistic smoothness;
-- a claim that one language is universally superior in every context.
+- user-turn normalization;
+- assistant output localization;
+- literal preservation for code fences and inline literals;
+- selective tool-result mediation;
+- cache reuse and cache-version behavior;
+- prompt-artifact preparation and freeze-once behavior;
+- compression and memory payload shaping;
+- delegation payload shaping and child-context inheritance;
+- gateway message preparation;
+- Hermes-side mediator wiring and session-bound usage.
 
-This is about **runtime discipline**, not language ideology.
+Local regression status at the time of this update:
+
+```text
+unilang tests: 69 passed
+hermes-agent unilang mediator tests: 3 passed
+```
 
 ---
 
-## Implementation Roadmap
+## Benchmarks
 
-### Phase 00 — Host integration
-Find the right interception seams inside Hermes.
+Two benchmark tracks are in use.
 
-### Phase 01 — Core runtime
-Establish the mediation contract and canonical flow.
+### 1. Deterministic local runtime benchmark
 
-### Phase 02 — Variants and storage
-Persist `raw`, `provider`, and `render` cleanly.
-
-### Phase 03 — Prompt artifacts
-Protect prompt stability, cacheability, and canonical prompt assembly.
-
-### Phase 04 — Tool results
-Introduce selective mediation for tool-heavy outputs without corrupting literals.
-
-### Phase 05 — Memory and compression
-Make summaries and memory writes canonical, inspectable, and evaluable.
-
-### Phase 06 — Delegation and gateways
-Push policy through child tasks and gateway delivery surfaces.
-
-### Phase 07 — Polish and upstreaming
-Harden, document, benchmark, and prepare the work for serious upstream discussion.
-
-## Phase 07 Packet
-
-Release-facing artifacts now live here:
-
-- `docs/OPERATOR-GUIDE.md`
-- `docs/MIGRATION.md`
-- `docs/ACCEPTANCE-CHECKLIST.md`
-- `docs/BENCHMARKS.md`
-- `docs/UPSTREAM-REVIEW.md`
-- `docs/RELEASE-NOTES.md`
-- `docs/PHASE-07-CLOSE-MEMO.md`
-
-Deterministic benchmark harness:
+File:
 
 - `benchmark_runtime.py`
 
+Purpose:
+
+- measure runtime overhead without network variance;
+- compare cold vs warm paths;
+- validate cache behavior.
+
+What it covers:
+
+- `normalize_user_message()`
+- `localize_assistant_output()`
+- `prepare_prompt_artifacts()`
+- `mediate_tool_result()`
+
+Existing local snapshot from `docs/BENCHMARKS.md`:
+
+- prompt-artifact warm path drops to ~`2 ms`;
+- cache hits are present and store failures are `0`;
+- tool-result mediation is the most expensive deterministic path, as expected.
+
+### 2. Live MiniMax end-to-end benchmark
+
+Files:
+
+- `scripts/benchmarks/benchmark_quick.py`
+- `scripts/benchmarks/benchmark_e2e_minimax.py`
+- `scripts/benchmarks/benchmark_e2e_minimax_controlled.py`
+
+The controlled 18-language benchmark was executed on VPS with MiniMax and produced:
+
+```text
+Detection:    18/18
+Normalization: 17/18
+Localization:  17/18
+Tool Med:      18/18
+```
+
+Observed live behavior:
+
+- detection covered all benchmark languages in the controlled run;
+- normalization and localization worked for all non-English benchmark cases except the expected English no-op path;
+- tool mediation preserved machine-critical content while remaining effectively negligible compared with live translation latency;
+- live translation latency varied by language and network conditions, typically from low single-digit seconds up to ~11.5 seconds for a localization step.
+
+Representative results from the controlled VPS run:
+
+```text
+Spanish:    det=Y(es)  norm=Y 5753ms  loc=Y 2927ms  tool=Y 17ms
+Portuguese: det=Y(pt-BR) norm=Y 1898ms loc=Y 6967ms tool=Y 14ms
+German:     det=Y(de)  norm=Y 1695ms  loc=Y 11555ms tool=Y 8ms
+Japanese:   det=Y(ja)  norm=Y 2443ms  loc=Y 11018ms tool=Y 7ms
+Hebrew:     det=Y(he)  norm=Y 2310ms  loc=Y 7513ms tool=Y 8ms
+```
+
 ---
 
-## Success Criteria
+## Architecture
 
-`unilang` is successful if it can demonstrate, with real Hermes flows, that:
+At a high level, `unilang` inserts a mediation layer around the agent runtime.
 
-- users retain native-language interaction;
-- provider-facing state remains stable and coherent;
-- literal artifacts are preserved correctly;
-- memory and compression quality improve or become more consistent;
-- delegation inherits cleaner payloads;
-- the system remains observable enough to debug failures instead of guessing.
+```mermaid
+flowchart LR
+    U[User message\nany language] --> N[Normalize input\ndetect · classify · decide · translate]
+    N --> P[Provider transcript\ncanonical internal language]
+    P --> H[Agent runtime\nreasoning · tools · memory · compression · delegation]
+    H --> L[Localize output\npreserve literals · render for user]
+    L --> R[Render transcript\nuser-facing language]
 
-If those conditions are not met, the project is decoration, not architecture.
+    U --> V[(Variant store)]
+    P --> V
+    R --> V
+```
+
+### Core runtime components
+
+| Component | Responsibility |
+|---|---|
+| `LanguageRuntime` | orchestration across all mediation paths |
+| `LanguageDetector` | heuristic per-message language detection |
+| `ContentClassifier` | distinguishes prose, code, terminal, structured, mixed |
+| `LanguagePolicyEngine` | decides whether and how to transform |
+| `BaseTranslationAdapter` | translation/localization contract |
+| `PassthroughTranslationAdapter` | deterministic no-op adapter for tests |
+| `MiniMaxTranslationAdapter` | live MiniMax-backed translation adapter |
+| `LanguageCache` | transform cache keyed by content and policy/model metadata |
+| `VariantStore` | persistence for `raw`, `provider`, and `render` variants |
+| `PromptArtifactScanner` | gating/scanning of prompt artifacts before preparation |
+
+### Runtime flow
+
+#### Input normalization
+
+`normalize_user_message()`:
+
+1. detects the input language;
+2. classifies content kind;
+3. decides whether normalization is needed;
+4. translates only if policy requires it;
+5. stores `raw` and `provider` variants.
+
+#### Output localization
+
+`localize_assistant_output()`:
+
+1. classifies the provider text;
+2. resolves the target render language from session state;
+3. localizes only when the render language differs from provider language;
+4. stores `provider` and `render` variants.
+
+#### Tool-result mediation
+
+`mediate_tool_result()` performs segment-aware mediation so only the natural-language parts are transformed.
 
 ---
 
-## What a Great Future README Could Eventually Add
+## Safety Invariants
 
-Once implementation matures, this README can grow into:
+> [!IMPORTANT]
+> If `unilang` mutates machine-critical literals, the runtime has failed.
 
-- concrete install instructions;
-- architecture diagrams tied to code paths;
-- benchmark results;
-- before/after examples for compression and memory quality;
-- literal preservation test suites;
-- integration examples against live Hermes seams;
-- an upstream contribution path.
+The runtime is designed to preserve:
 
-That future README should feel inevitable.
+- fenced code blocks;
+- inline code spans;
+- shell commands and flags;
+- file paths;
+- URLs;
+- environment variables and placeholders;
+- structured payloads like JSON / YAML / XML;
+- stack traces and terminal logs;
+- identifiers, package names, and symbols.
 
-This one is designed to make the project feel **serious enough to deserve it**.
+Fluency is useful. Literal integrity is mandatory.
 
 ---
 
-## A Final Line
+## Hermes Integration
 
-<div align="center">
+`unilang` is integrated into Hermes through `agent/unilang_mediator.py`.
 
-**Multilingual UX is easy to demo.**  
-**Multilingual runtime coherence is the real problem.**
+The current integration points are:
 
-**`unilang` exists for the second one.**
+1. **turn input**: normalize the user message before it enters the main loop;
+2. **tool result**: mediate tool output before reinserting it into the transcript;
+3. **final output**: localize the assistant response before returning it to the user;
+4. **session binding**: keep mediation state scoped to the active Hermes session.
 
-</div>
+The mediator is safe by default:
+
+- when `language_mediation.enabled = false`, all methods are pass-through;
+- existing English-only workflows remain unchanged;
+- MiniMax can be enabled without changing the runtime contract.
+
+---
+
+## Installation
+
+### Base package
+
+```bash
+pip install -e .
+```
+
+### With MiniMax support
+
+```bash
+pip install -e ".[minimax]"
+```
+
+### Test dependencies
+
+```bash
+pip install -e ".[dev]"
+```
+
+---
+
+## Configuration
+
+Minimal runtime configuration revolves around:
+
+- `enabled`
+- `provider_language`
+- translator/adapter selection
+- output policy
+- optional cache / variant store
+
+Example environment file:
+
+```env
+MINIMAX_API_KEY=your-minimax-api-key-here
+```
+
+Key defaults from `src/unilang/config.py`:
+
+| Key | Default |
+|---|---|
+| `enabled` | `False` |
+| `provider_language` | `en` |
+| `render_language` | `auto` |
+| `turn_input.normalize_user_messages` | `True` |
+| `output.localize_assistant_messages` | `True` |
+| `output.preserve_literals` | `True` |
+| `tool_results.enabled` | `False` |
+| `compression.enabled` | `False` |
+| `memory.enabled` | `False` |
+
+---
+
+## Repository Layout
+
+```text
+src/unilang/                 package source
+tests/                       automated regression tests
+scripts/benchmarks/          live and deterministic benchmark runners
+scripts/dev/                 inspection helpers
+scripts/smoke/               manual integration smoke scripts
+docs/                        architecture, operator, and benchmark notes
+benchmark_runtime.py         deterministic benchmark harness
+benchmark_e2e_multilingual.py baseline multilingual benchmark using passthrough adapter
+```
+
+---
+
+## Design Basis
+
+This project is based on three sources of evidence:
+
+### 1. Runtime architecture analysis
+
+The design is built around real agent seams, especially:
+
+- prompt assembly;
+- message persistence;
+- context compression;
+- memory writes;
+- delegation payloads;
+- gateway-facing output.
+
+### 2. Systems-oriented multilingual constraints
+
+The project treats multilinguality as a **state-management problem**, not just an output-formatting problem.
+
+That framing drives:
+
+- canonical provider transcript design;
+- sidecar variant persistence;
+- cache keys tied to policy/model metadata;
+- segment-aware mediation for tool results;
+- strict literal-preservation invariants.
+
+### 3. Runtime experiments and benchmarks
+
+The implementation has been shaped against:
+
+- deterministic local runtime benchmarks;
+- live MiniMax translation runs;
+- VPS end-to-end multilingual benchmark execution;
+- Hermes-side mediator smoke tests.
+
+---
+
+## Documentation
+
+Supporting docs in `docs/`:
+
+- `ARCHITECTURE.md`
+- `BENCHMARKS.md`
+- `OPERATOR-GUIDE.md`
+- `REMOTE-TESTING.md`
+- `IMPLEMENTATION-STRATEGY.md`
+- `MIGRATION.md`
+- `ACCEPTANCE-CHECKLIST.md`
+- `RELEASE-NOTES.md`
+
+---
+
+## Limitations
+
+Current limitations are explicit:
+
+- the detector is heuristic and benchmark-oriented, not a general language-ID service;
+- live translation latency is dominated by external model/network cost;
+- retrieval mediation and streaming localization are not implemented;
+- the Portuguese README may lag behind the English README during rapid iteration.
+
+---
+
+## Summary
+
+`unilang` is a practical runtime layer for multilingual agent systems.
+
+It is already useful because it solves the hard part correctly:
+
+- **keep machine-facing state coherent**;
+- **keep the human experience native**;
+- **never corrupt literals**.
+
+That is the core systems promise of the project.
