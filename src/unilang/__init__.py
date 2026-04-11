@@ -42,6 +42,17 @@ from .types import (
 )
 from .variant_store import VariantStore
 
+MiniMaxTranslationAdapter = None
+try:
+    from .minimax_adapter import MiniMaxTranslationAdapter as _MiniMaxAdapter
+
+    class _MiniMaxWrapper:
+        pass
+
+    MiniMaxTranslationAdapter = _MiniMaxAdapter
+except ImportError:
+    pass
+
 __all__ = [
     "BaseTranslationAdapter",
     "BasePromptArtifactScanner",
@@ -88,3 +99,6 @@ __all__ = [
     "VariantStore",
     "VariantKind",
 ]
+
+if MiniMaxTranslationAdapter is not None:
+    __all__.append("MiniMaxTranslationAdapter")

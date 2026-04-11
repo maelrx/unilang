@@ -18,6 +18,9 @@ dependencies = []
 dev = [
   "pytest>=8.0",
 ]
+minimax = [
+  "anthropic>=0.40.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
